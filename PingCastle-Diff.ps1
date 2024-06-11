@@ -7,8 +7,12 @@ $new_name
 $old_name
 
 ### EDIT THIS PARAMETERS ###
-$teams = 1
+$teams = 0
 $teamsUri = "..."
+$element = 0
+$elementUri = "..."
+$usernameMaubot = "..."
+$passwordMaubot = "..."
 $print_current_result = 1 #print result of the new report (latest pingcastle scan)
 ### END ###
 
@@ -43,17 +47,40 @@ $BodyTeams = @"
 - add_new_vuln
 "@
 
+$BodyElement = @"
+Domain *domain_env* - date_scan - *Global Score abc* : 
+- Score: *[cbd Trusts | def Stale Object | asx Privileged Group | dse Anomalies]*
+- add_new_vuln
+"@
+
 # function send to webhook
 Function Send_WebHook($body, $connector) {
     if ($teams -and $connector -eq "teams") {
         Write-Host "Sending to teams"
         return Invoke-RestMethod -Method post -ContentType 'application/Json' -Body $body -Uri $teamsUri
     }
+    if ($element -and $connector -eq "element") {
+        Write-Host "Sending to element"
+        # Encode the username and password
+        $base64AuthInfo = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(("${usernameMaubot}:${passwordMaubot}")))
+        # Define the payload
+        $payload = @{
+            msg = $body
+        }
+        $payloadJson = $payload | ConvertTo-Json
+        Write-Host $payloadJson
+        return Invoke-RestMethod -Method post -ContentType 'application/Json' -Body $payloadJson -Uri $elementUri -Headers @{
+            Authorization = "Basic $base64AuthInfo"
+        }
+    }
 }
 
 # function update body
 Function Update_Body($body, $connector) {
         if ($connector -eq "teams") {
+            return $body.Replace("abc",$str_total_point).Replace("cbd", $str_trusts).Replace("def", $str_staleObject).Replace("asx", $str_privilegeAccount).Replace("dse", $str_anomalies).Replace("domain_env", $domainName).Replace("date_scan", $dateScan.ToString("dd/MM/yyyy"))
+        }
+        if ($connector -eq "element") {
             return $body.Replace("abc",$str_total_point).Replace("cbd", $str_trusts).Replace("def", $str_staleObject).Replace("asx", $str_privilegeAccount).Replace("dse", $str_anomalies).Replace("domain_env", $domainName).Replace("date_scan", $dateScan.ToString("dd/MM/yyyy"))
         }
 }
@@ -177,6 +204,8 @@ $str_privilegeAccount = Add_Color $PrivilegedAccounts
 $str_anomalies = Add_Color $Anomalies
 $BodyTeams = Update_Body $BodyTeams "teams"
 
+$BodyElement = Update_Body $BodyElement "element"
+
 $old_report_xml = Join-Path $PSScriptRoot ('{0}.xml' -f $old_name)
 $old_report_html = Join-Path $PSScriptRoot ('{0}.html' -f $old_name)
 # Check if OLD report exists
@@ -226,23 +255,27 @@ if ([int]$previous_score -eq [int]$total_point -and (IsEqual $StaleObjects_old $
     if ($addedVuln -or $removedVuln -or $warningVuln) {
         $sentNotification = $True
         $BodyTeams = $BodyTeams.Replace("add_new_vuln", "There is no new vulnerability yet some rules have changed !")
+        $BodyElement = $BodyElement.Replace("add_new_vuln", "There is no new vulnerability yet some rules have changed !")
     } else {
         $sentNotification = $False
-        $BodyTeams = $BodyTeams.Replace("add_new_vuln", "There is no new vulnerability ! &#129395;")
+        $BodyElement = $BodyElement.Replace("add_new_vuln", "There is no new vulnerability ! &#129395;")
 
     }
 } elseIf  ([int]$previous_score -lt [int]$total_point) {
     Write-Host "rage"
     $sentNotification = $true
     $BodyTeams = $BodyTeams.Replace("add_new_vuln", "New rules flagged **+" + [string]([int]$total_point-[int]$previous_score) + " points** &#128544; `n`n")
+    $BodyElement = $BodyElement.Replace("add_new_vuln", "New rules flagged **+" + [string]([int]$total_point-[int]$previous_score) + " points** &#128544; `n`n")
 } elseIf  ([int]$previous_score -gt [int]$total_point) {
     Write-Host "no rage"
     $sentNotification = $true
     $BodyTeams = $BodyTeams.Replace("add_new_vuln", "Yeah, some improvement have been made *-" +  [string]([int]$previous_score-[int]$total_point) + " points* &#128516; `n`n")
+    $BodyElement = $BodyElement.Replace("add_new_vuln", "Yeah, some improvement have been made *-" +  [string]([int]$previous_score-[int]$total_point) + " points* &#128516; `n`n")
 } else {
     Write-Host "same global score but different score in categories"
     $sentNotification = $true
     $BodyTeams = $BodyTeams.Replace("add_new_vuln", "New rules flagged but also some fix, yet same score than previous scan `n`n")
+    $BodyElement = $BodyElement.Replace("add_new_vuln", "New rules flagged but also some fix, yet same score than previous scan `n`n")
 }
 $final_thread = $addedVuln + $removedVuln + $warningVuln
 #}
@@ -273,6 +306,25 @@ try {
         $BodyTeams = $BodyTeams.Replace(":red_circle:","&#128308;").Replace(":large_orange_circle:","&#128992;").Replace(":large_yellow_circle:","&#128993;").Replace(":large_green_circle:","&#128994;")
         $BodyTeams = $BodyTeams.Replace(":heavy_exclamation_mark:", "&#10071;").Replace(":white_check_mark:", "&#9989;").Replace(":arrow_forward:", "&#128312;")
         $r = Send_WebHook $BodyTeams "teams"
+    }
+    if ($element) {
+        $current_scan = $current_scan.replace("'", "\'")
+        $final_thread = $final_thread.replace("'", "\'")
+        Write-Host $current_scan
+        Write-Host $final_thread
+        if ($print_current_result) {
+            $BodyElement = $BodyElement + $final_thread + "`n`---`n" + "**All the matched rules from the latest scan**`n" + $current_scan #+ "'}"
+        }
+        else {
+            $BodyElement = $BodyElement + $final_thread #+ "'}"
+        }
+        $BodyElement = $BodyElement.Replace("*","**").Replace("`n","  `n")
+        Write-Host $BodyElement
+        $BodyElement = $BodyElement.Replace(":red_circle:","&#128308;").Replace(":large_orange_circle:","&#128992;").Replace(":large_yellow_circle:","&#128993;").Replace(":large_green_circle:","&#128994;")
+        Write-Host $BodyElement
+        $BodyElement = $BodyElement.Replace(":heavy_exclamation_mark:", "&#10071;").Replace(":white_check_mark:", "&#9989;").Replace(":arrow_forward:", "&#128312;")
+        Write-Host $BodyElement
+        $r = Send_WebHook $BodyElement "element"
     }
     # write log report
     "Last scan " + $dateScan | out-file -append $logreport 
