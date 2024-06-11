@@ -310,8 +310,6 @@ try {
     if ($element) {
         $current_scan = $current_scan.replace("'", "\'")
         $final_thread = $final_thread.replace("'", "\'")
-        Write-Host $current_scan
-        Write-Host $final_thread
         if ($print_current_result) {
             $BodyElement = $BodyElement + $final_thread + "`n`---`n" + "**All the matched rules from the latest scan**`n" + $current_scan #+ "'}"
         }
@@ -319,11 +317,8 @@ try {
             $BodyElement = $BodyElement + $final_thread #+ "'}"
         }
         $BodyElement = $BodyElement.Replace("*","**").Replace("`n","  `n")
-        Write-Host $BodyElement
         $BodyElement = $BodyElement.Replace(":red_circle:","&#128308;").Replace(":large_orange_circle:","&#128992;").Replace(":large_yellow_circle:","&#128993;").Replace(":large_green_circle:","&#128994;")
-        Write-Host $BodyElement
         $BodyElement = $BodyElement.Replace(":heavy_exclamation_mark:", "&#10071;").Replace(":white_check_mark:", "&#9989;").Replace(":arrow_forward:", "&#128312;")
-        Write-Host $BodyElement
         $r = Send_WebHook $BodyElement "element"
     }
     # write log report
